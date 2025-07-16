@@ -4,6 +4,7 @@ export interface SimulationInputs {
     to: string;
   };
   dailyVolumes: number[];
+  rosterData: number[][];
   plannedAHT: number;
   inOfficeShrinkage: number;
   outOfOfficeShrinkage: number;

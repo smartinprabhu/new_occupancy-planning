@@ -194,3 +194,57 @@ export function runSimulation(inputs: SimulationInputs): SimulationResults {
     dailyMetrics
   };
 }
+
+export function calculateLivePerformance(
+  dailyVolume: number,
+  rosterAgents: number[],
+  inputs: SimulationInputs
+): any[] {
+  const performanceData = [];
+  
+  for (let interval = 0; interval < 48; interval++) {
+    const hour = Math.floor(interval / 2);
+    const minute = (interval % 2) * 30;
+    const intervalLabel = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    
+    const derivedVolume = dailyVolume * timeDistributionProfile[interval];
+    const actualAgents = rosterAgents[interval] || 0;
+    
+    const effectiveAgents = actualAgents * 
+      (1 - inputs.inOfficeShrinkage) * 
+      (1 - inputs.outOfOfficeShrinkage) * 
+      (1 - inputs.billableBreakPercent);
+    
+    const requiredAgents = calculateRequiredAgents(
+      derivedVolume, 
+      inputs.plannedAHT, 
+      inputs.slaTarget, 
+      inputs.serviceTime
+    );
+    
+    const slaAchieved = calculateSLA(
+      derivedVolume, 
+      inputs.plannedAHT, 
+      effectiveAgents, 
+      inputs.serviceTime
+    );
+    
+    const occupancy = calculateOccupancy(
+      derivedVolume, 
+      inputs.plannedAHT, 
+      effectiveAgents
+    );
+    
+    performanceData.push({
+      interval: intervalLabel,
+      actual: effectiveAgents,
+      required: requiredAgents,
+      variance: effectiveAgents - requiredAgents,
+      occupancy: occupancy * 100,
+      sla: slaAchieved * 100,
+      volume: derivedVolume
+    });
+  }
+  
+  return performanceData;
+}
