@@ -21,13 +21,14 @@ function erlangC(agents: number, intensity: number): number {
 }
 
 function calculateSLA(volume: number, aht: number, agents: number, serviceTime: number): number {
+  if (agents <= 0) return 0;
   const intensity = (volume * aht) / 1800; // 30-minute intervals
+  if (agents <= intensity) return 0;
+
   const pWait = erlangC(agents, intensity);
   const serviceRate = agents / aht;
   
-  if (agents <= intensity) return 0;
-  
-  const sla = 1 - pWait * Math.exp(-serviceRate * (agents - intensity) * serviceTime);
+  const sla = 1 - pWait * Math.exp(-(serviceRate * (agents - intensity)) * serviceTime);
   return Math.max(0, Math.min(1, sla));
 }
 
@@ -38,53 +39,53 @@ function calculateOccupancy(volume: number, aht: number, agents: number): number
 
 function calculateRequiredAgents(volume: number, aht: number, slaTarget: number, serviceTime: number): number {
   const intensity = (volume * aht) / 1800;
-  let agents = Math.ceil(intensity);
   
-  // Binary search for optimal agent count
+  // Start with a reasonable guess
   let low = Math.ceil(intensity);
-  let high = Math.ceil(intensity * 2);
-  
-  while (low < high) {
+  let high = Math.max(low + 10, Math.ceil(low * 2)); // Ensure high is greater than low
+
+  // If intensity is 0, no agents are required
+  if (intensity === 0) return 0;
+
+  let requiredAgents = high;
+
+  // Binary search for optimal agent count
+  while (low <= high) {
     const mid = Math.floor((low + high) / 2);
+    if (mid === 0) {
+        low = 1;
+        continue;
+    }
     const sla = calculateSLA(volume, aht, mid, serviceTime);
     
     if (sla >= slaTarget) {
-      high = mid;
+      requiredAgents = mid;
+      high = mid - 1;
     } else {
       low = mid + 1;
     }
   }
   
-  return low;
+  return requiredAgents;
 }
 
 // Time distribution profile (typical contact center pattern)
 const timeDistributionProfile = [
-  0.015, 0.012, 0.010, 0.008, 0.007, 0.008, 0.012, 0.018, // 00:00-04:00
-  0.025, 0.035, 0.045, 0.055, 0.065, 0.070, 0.075, 0.078, // 04:00-08:00
-  0.080, 0.085, 0.088, 0.090, 0.092, 0.090, 0.088, 0.085, // 08:00-12:00
-  0.082, 0.080, 0.078, 0.075, 0.072, 0.070, 0.068, 0.065, // 12:00-16:00
-  0.060, 0.055, 0.050, 0.045, 0.040, 0.035, 0.030, 0.025, // 16:00-20:00
-  0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006  // 20:00-24:00
+  0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, // 00:00-04:00
+  0.015, 0.025, 0.040, 0.050, 0.060, 0.070, 0.075, 0.080, // 04:00-08:00
+  0.085, 0.090, 0.090, 0.085, 0.080, 0.075, 0.070, 0.065, // 08:00-12:00
+  0.060, 0.055, 0.050, 0.050, 0.050, 0.050, 0.045, 0.040, // 12:00-16:00
+  0.035, 0.030, 0.025, 0.020, 0.015, 0.010, 0.010, 0.010, // 16:00-20:00
+  0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, // 20:00-24:00
 ];
 
-// Agent distribution across shifts (assuming 8.5 hour shifts)
-const shiftDistributionProfile = [
-  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // 00:00-04:00
-  0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, // 04:00-08:00
-  1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // 08:00-12:00
-  1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // 12:00-16:00
-  1.0, 1.0, 0.8, 0.6, 0.4, 0.2, 0.0, 0.0, // 16:00-20:00
-  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  // 20:00-24:00
-];
-
-export function generateIntervalData(inputs: SimulationInputs): IntervalData[] {
+export function generateIntervalData(inputs: SimulationInputs & { dailyVolumes: number[] }): IntervalData[] {
   const intervalData: IntervalData[] = [];
   const totalDays = inputs.dailyVolumes.length;
   
   for (let day = 0; day < totalDays; day++) {
     const dailyVolume = inputs.dailyVolumes[day];
-    const dailyAgents = inputs.dailyShiftPlan[day] || [];
+    const dailyRoster = inputs.agentRoster[day] || [];
     
     for (let interval = 0; interval < 48; interval++) {
       const hour = Math.floor(interval / 2);
@@ -92,7 +93,7 @@ export function generateIntervalData(inputs: SimulationInputs): IntervalData[] {
       const intervalLabel = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
       
       const derivedVolume = dailyVolume * timeDistributionProfile[interval];
-      const derivedAgents = (dailyAgents[0] || 0) * shiftDistributionProfile[interval];
+      const derivedAgents = dailyRoster[interval] || 0;
       
       const effectiveAgents = derivedAgents * 
         (1 - inputs.inOfficeShrinkage) * 
@@ -128,7 +129,7 @@ export function generateIntervalData(inputs: SimulationInputs): IntervalData[] {
         requiredAgents,
         slaAchieved,
         occupancy,
-        staffingGap: derivedAgents - requiredAgents
+        staffingGap: effectiveAgents - requiredAgents
       });
     }
   }
@@ -136,7 +137,7 @@ export function generateIntervalData(inputs: SimulationInputs): IntervalData[] {
   return intervalData;
 }
 
-export function runSimulation(inputs: SimulationInputs): SimulationResults {
+export function runSimulation(inputs: SimulationInputs & { dailyVolumes: number[] }): SimulationResults {
   // Validate inputs
   if (!inputs.dailyVolumes || inputs.dailyVolumes.length === 0) {
     throw new Error('Daily volumes are required for simulation');
@@ -149,30 +150,47 @@ export function runSimulation(inputs: SimulationInputs): SimulationResults {
   const intervalData = generateIntervalData(inputs);
   
   if (intervalData.length === 0) {
-    throw new Error('No interval data generated');
+    return {
+        finalSLA: 0,
+        finalOccupancy: 0,
+        intervalData: [],
+        dailyMetrics: []
+    }
   }
   
   // Calculate weighted averages
   const totalVolume = intervalData.reduce((sum, interval) => sum + interval.derivedVolume, 0);
   
   if (totalVolume === 0) {
-    throw new Error('Total volume cannot be zero');
+    return {
+        finalSLA: 1,
+        finalOccupancy: 0,
+        intervalData,
+        dailyMetrics: []
+    }
   }
   
   const finalSLA = intervalData.reduce((sum, interval) => 
     sum + (interval.slaAchieved * interval.derivedVolume), 0) / totalVolume;
   
-  const finalOccupancy = intervalData.reduce((sum, interval) => 
-    sum + (interval.occupancy * interval.derivedVolume), 0) / totalVolume;
+  const finalOccupancy = intervalData.reduce((sum, interval) => {
+    const weightedOccupancy = interval.occupancy * interval.derivedVolume;
+    return sum + (isNaN(weightedOccupancy) ? 0 : weightedOccupancy);
+  }, 0) / totalVolume;
   
   // Generate daily metrics
-  const dailyMetrics = inputs.dailyVolumes.map((volume, index) => {
+  const dailyMetrics = inputs.dailyVolumes.map((_, index) => {
     const dayIntervals = intervalData.slice(index * 48, (index + 1) * 48);
     const dayVolume = dayIntervals.reduce((sum, interval) => sum + interval.derivedVolume, 0);
-    const daySLA = dayIntervals.reduce((sum, interval) => 
-      sum + (interval.slaAchieved * interval.derivedVolume), 0) / dayVolume;
-    const dayOccupancy = dayIntervals.reduce((sum, interval) => 
-      sum + (interval.occupancy * interval.derivedVolume), 0) / dayVolume;
+
+    const daySLA = dayVolume > 0
+      ? dayIntervals.reduce((sum, interval) => sum + (interval.slaAchieved * interval.derivedVolume), 0) / dayVolume
+      : 1;
+
+    const dayOccupancy = dayVolume > 0
+      ? dayIntervals.reduce((sum, interval) => sum + (interval.occupancy * interval.derivedVolume), 0) / dayVolume
+      : 0;
+
     const avgStaffing = dayIntervals.reduce((sum, interval) => sum + interval.effectiveAgents, 0) / 48;
     
     const date = new Date(inputs.dateRange.from);
@@ -180,8 +198,8 @@ export function runSimulation(inputs: SimulationInputs): SimulationResults {
     
     return {
       date: date.toISOString().split('T')[0],
-      sla: daySLA,
-      occupancy: dayOccupancy,
+      sla: isNaN(daySLA) ? 1 : daySLA,
+      occupancy: isNaN(dayOccupancy) ? 0 : dayOccupancy,
       totalVolume: dayVolume,
       avgStaffing
     };
@@ -189,7 +207,7 @@ export function runSimulation(inputs: SimulationInputs): SimulationResults {
   
   return {
     finalSLA,
-    finalOccupancy,
+    finalOccupancy: isNaN(finalOccupancy) ? 0 : finalOccupancy,
     intervalData,
     dailyMetrics
   };

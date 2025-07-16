@@ -3,7 +3,7 @@ export interface SimulationInputs {
     from: string;
     to: string;
   };
-  dailyVolumes: number[];
+  agentRoster: number[][];
   plannedAHT: number;
   inOfficeShrinkage: number;
   outOfOfficeShrinkage: number;
@@ -11,7 +11,6 @@ export interface SimulationInputs {
   slaTarget: number;
   serviceTime: number;
   shiftDuration: number;
-  dailyShiftPlan: number[][];
 }
 
 export interface IntervalData {

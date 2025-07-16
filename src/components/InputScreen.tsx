@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { Calendar, Play, RotateCcw, Download, Upload, Settings } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, RotateCcw, Download, Upload, Settings } from 'lucide-react';
 import { SimulationInputs, SimulationResults } from '../types';
 import { runSimulation } from '../utils/calculations';
-import { VolumeMatrix } from './VolumeMatrix';
+import { AgentRoster } from './AgentRoster';
+import { PlotAnalysis } from './PlotAnalysis';
 import { Tooltip } from './Tooltip';
 import { getTooltip } from '../utils/tooltips';
 
@@ -13,7 +14,7 @@ interface InputScreenProps {
 export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }) => {
   const [inputs, setInputs] = useState<SimulationInputs>({
     dateRange: { from: '2025-06-29', to: '2025-07-26' },
-    dailyVolumes: [],
+    agentRoster: [],
     plannedAHT: 1560,
     inOfficeShrinkage: 0.0,
     outOfOfficeShrinkage: 0.3488,
@@ -21,10 +22,15 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
     slaTarget: 0.80,
     serviceTime: 30,
     shiftDuration: 8.5,
-    dailyShiftPlan: []
   });
-
+  const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (inputs.agentRoster.length > 0) {
+      handleRunSimulation();
+    }
+  }, [inputs.agentRoster, inputs.plannedAHT, inputs.inOfficeShrinkage, inputs.outOfOfficeShrinkage, inputs.billableBreakPercent, inputs.slaTarget, inputs.serviceTime, inputs.shiftDuration]);
 
   const handleDateRangeChange = (field: 'from' | 'to', value: string) => {
     setInputs(prev => ({
@@ -39,71 +45,39 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
     const to = new Date(from);
     to.setDate(from.getDate() + (weeks * 7) - 1);
     
-    setInputs(prev => ({
-      ...prev,
-      dateRange: {
-        from: from.toISOString().split('T')[0],
-        to: to.toISOString().split('T')[0]
-      }
-    }));
-    
-    // Auto-generate sample data for the selected period
-    const totalDays = weeks * 7;
-    const sampleVolumes = Array.from({ length: totalDays }, (_, i) => {
-      const dayOfWeek = i % 7;
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      const baseVolume = isWeekend ? 450 : 600;
-      const variation = Math.random() * 100 - 50;
-      return Math.round(baseVolume + variation);
-    });
+    const newDateRange = {
+      from: from.toISOString().split('T')[0],
+      to: to.toISOString().split('T')[0]
+    };
     
     setInputs(prev => ({
       ...prev,
-      dailyVolumes: sampleVolumes,
-      dailyShiftPlan: sampleVolumes.map(() => [50])
+      dateRange: newDateRange
     }));
+
+    const dayCount = (weeks * 7);
+    const newRoster = Array.from({ length: dayCount }, () => Array(48).fill(0));
+    handleRosterChange(newRoster);
   };
 
   const [selectedWeeks, setSelectedWeeks] = useState(4);
 
-  const handleLoadSample = () => {
-    const dayCount = getDayCount();
-    const sampleVolumes = Array.from({ length: dayCount }, (_, i) => {
-      const dayOfWeek = i % 7;
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      const baseVolume = isWeekend ? 450 : 600;
-      const variation = Math.random() * 100 - 50;
-      return Math.round(baseVolume + variation);
-    });
-    
-    setInputs(prev => ({
-      ...prev,
-      dailyVolumes: sampleVolumes,
-      dailyShiftPlan: sampleVolumes.map(() => [50])
-    }));
-  };
-
   const handleRunSimulation = async () => {
-    // Validate inputs before running simulation
     if (!inputs.dateRange.from || !inputs.dateRange.to) {
-      alert('Please select a date range');
-      return;
-    }
-    
-    if (!inputs.dailyVolumes || inputs.dailyVolumes.length === 0) {
-      alert('Please load sample data or enter daily volumes');
       return;
     }
     
     setIsLoading(true);
     try {
-      console.log('Running simulation with inputs:', inputs);
-      const results = runSimulation(inputs);
-      console.log('Simulation results:', results);
-      onSimulationComplete(results, inputs);
+      const results = runSimulation({
+        ...inputs,
+        // @ts-ignore
+        dailyVolumes: Array(getDayCount()).fill(1000), // Use default volume
+      });
+      setSimulationResults(results);
     } catch (error) {
       console.error('Simulation error:', error);
-      alert(`Simulation failed: ${error.message}`);
+      // alert(`Simulation failed: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -112,7 +86,7 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
   const handleClear = () => {
     setInputs({
       dateRange: { from: '', to: '' },
-      dailyVolumes: [],
+      agentRoster: [],
       plannedAHT: 1560,
       inOfficeShrinkage: 0.0,
       outOfOfficeShrinkage: 0.3488,
@@ -120,8 +94,8 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
       slaTarget: 0.80,
       serviceTime: 30,
       shiftDuration: 8.5,
-      dailyShiftPlan: []
     });
+    setSimulationResults(null);
   };
 
   const getDayCount = () => {
@@ -133,11 +107,10 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
 
   const getWeekCount = () => Math.ceil(getDayCount() / 7);
 
-  const handleDailyVolumesChange = (volumes: number[]) => {
+  const handleRosterChange = (newRoster: number[][]) => {
     setInputs(prev => ({
       ...prev,
-      dailyVolumes: volumes,
-      dailyShiftPlan: volumes.map(() => [50])
+      agentRoster: newRoster,
     }));
   };
 
@@ -154,7 +127,11 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
             <button className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md font-medium text-sm">
               Input Configuration
             </button>
-            <button className="px-3 sm:px-4 py-2 bg-slate-700 text-slate-300 rounded-md font-medium text-sm">
+            <button
+              onClick={() => onSimulationComplete(simulationResults, inputs)}
+              disabled={!simulationResults}
+              className="px-3 sm:px-4 py-2 bg-slate-700 text-slate-300 rounded-md font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               Output Dashboard
             </button>
             <button className="px-3 sm:px-4 py-2 bg-slate-700 text-slate-300 rounded-md font-medium flex items-center gap-2 text-sm">
@@ -236,10 +213,6 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
         {/* Configuration Parameters */}
         <div className="bg-slate-800 rounded-lg p-4 sm:p-6">
           <h2 className="text-lg font-semibold mb-4">Configuration Parameters</h2>
-          <div className="text-sm text-slate-400 mb-4">
-            LOB: Contact Center | Forecast Range: {inputs.dateRange.from} to {inputs.dateRange.to} | {getDayCount()} days ({getWeekCount()} weeks)
-          </div>
-          
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2 flex items-center gap-1">
@@ -338,16 +311,7 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
                 <option value={10}>10 hours</option>
               </select>
             </div>
-            
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleLoadSample}
-                  className="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded font-medium flex items-center gap-2 text-sm"
-                >
-                  <Download size={16} />
-                  Load Sample
-                </button>
+            <div className="flex items-end">
                 <button
                   onClick={handleClear}
                   className="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded font-medium flex items-center gap-2 text-sm"
@@ -355,28 +319,42 @@ export const InputScreen: React.FC<InputScreenProps> = ({ onSimulationComplete }
                   <RotateCcw size={16} />
                   Clear
                 </button>
-              </div>
-              <button
-                onClick={handleRunSimulation}
-                disabled={isLoading || inputs.dailyVolumes.length === 0}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white rounded font-medium flex items-center gap-2 text-sm"
-              >
-                <Play size={16} />
-                {isLoading ? 'Running...' : 'Run Simulation'}
-              </button>
             </div>
           </div>
         </div>
 
-        {/* Volume Matrix */}
+        {simulationResults && (
+          <div className="bg-slate-800 rounded-lg p-4 sm:p-6">
+            <h2 className="text-lg font-semibold mb-4">Simulation Results</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+              <div className="bg-slate-700 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-slate-300 mb-2">Final SLA</h3>
+                <p className="text-2xl font-bold text-green-400">
+                  {(simulationResults.finalSLA * 100).toFixed(2)}%
+                </p>
+              </div>
+              <div className="bg-slate-700 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-slate-300 mb-2">Final Occupancy</h3>
+                <p className="text-2xl font-bold text-orange-400">
+                  {(simulationResults.finalOccupancy * 100).toFixed(2)}%
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {inputs.dateRange.from && inputs.dateRange.to && (
-          <VolumeMatrix
+          <AgentRoster
             dateRange={inputs.dateRange}
-            dailyVolumes={inputs.dailyVolumes}
-            onVolumeChange={() => {}}
-            onDailyVolumesChange={handleDailyVolumesChange}
+            agentRoster={inputs.agentRoster}
+            onRosterChange={handleRosterChange}
           />
         )}
+
+        {simulationResults && (
+           <PlotAnalysis results={simulationResults} />
+        )}
+
       </div>
     </div>
   );

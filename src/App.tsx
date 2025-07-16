@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { InputScreen } from './components/InputScreen';
 import { OutputScreen } from './components/OutputScreen';
-import { SimulationResults } from './types';
+import { SimulationInputs, SimulationResults } from './types';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<'input' | 'output'>('input');
   const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
   const [simulationInputs, setSimulationInputs] = useState<SimulationInputs | null>(null);
+
 
   const handleSimulationComplete = (results: SimulationResults, inputs: SimulationInputs) => {
     setSimulationResults(results);
